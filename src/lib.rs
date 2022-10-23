@@ -424,24 +424,24 @@ mod vfs {
             Ok(f) => Ok(f),
             // handle creation failure due to readonly directory
             Err(err)
-                if err.kind() == ErrorKind::PermissionDenied
-                    && matches!(
+            if err.kind() == ErrorKind::PermissionDenied
+                && matches!(
                         opts.kind,
                         OpenKind::SuperJournal | OpenKind::MainJournal | OpenKind::Wal
                     )
-                    && matches!(opts.access, OpenAccess::Create | OpenAccess::CreateNew)
-                    && !state.vfs.exists(&name).unwrap_or(false) =>
-            {
-                return state.set_last_error(ffi::SQLITE_READONLY_DIRECTORY, err);
-            }
+                && matches!(opts.access, OpenAccess::Create | OpenAccess::CreateNew)
+                && !state.vfs.exists(&name).unwrap_or(false) =>
+                {
+                    return state.set_last_error(ffi::SQLITE_READONLY_DIRECTORY, err);
+                }
 
             // Try again as readonly
             Err(err)
-                if err.kind() == ErrorKind::PermissionDenied && opts.access != OpenAccess::Read =>
-            {
-                opts.access = OpenAccess::Read;
-                state.vfs.open(&name, opts.clone()).map_err(|_| err)
-            }
+            if err.kind() == ErrorKind::PermissionDenied && opts.access != OpenAccess::Read =>
+                {
+                    opts.access = OpenAccess::Read;
+                    state.vfs.open(&name, opts.clone()).map_err(|_| err)
+                }
 
             // e.g. tried to open a directory
             Err(err) if err.kind() == ErrorKind::Other && opts.access == OpenAccess::Read => {
@@ -798,9 +798,13 @@ mod vfs {
         log::trace!("current_time_int64");
 
         const UNIX_EPOCH: i64 = 24405875 * 8640000;
-        let now = time::OffsetDateTime::now_utc().unix_timestamp() + UNIX_EPOCH;
+        let now = if cfg!(all(target_arch = "wasm32", target_os = "unknown")) {
+            (ic_cdk::api::time() as f64 / 1000000000.0) as i64 + UNIX_EPOCH
+        } else {
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 + UNIX_EPOCH
+        };
         #[cfg(feature = "sqlite_test")]
-        let now = if ffi::sqlite3_get_current_time() > 0 {
+            let now = if ffi::sqlite3_get_current_time() > 0 {
             ffi::sqlite3_get_current_time() as i64 * 1000 + UNIX_EPOCH
         } else {
             now
@@ -975,14 +979,14 @@ mod io {
         let result = state.file.write_all_at(data, i_ofst as u64);
 
         #[cfg(feature = "sqlite_test")]
-        let result = if simulate_io_error() {
+            let result = if simulate_io_error() {
             Err(ErrorKind::Other.into())
         } else {
             result
         };
 
         #[cfg(feature = "sqlite_test")]
-        let result = if simulate_diskfull_error() {
+            let result = if simulate_diskfull_error() {
             Err(ErrorKind::WriteZero.into())
         } else {
             result
@@ -1886,10 +1890,10 @@ impl OpenOptions {
         self.kind.to_flags()
             | self.access.to_flags()
             | if self.delete_on_close {
-                ffi::SQLITE_OPEN_DELETEONCLOSE
-            } else {
-                0
-            }
+            ffi::SQLITE_OPEN_DELETEONCLOSE
+        } else {
+            0
+        }
     }
 }
 
@@ -1926,11 +1930,11 @@ impl OpenAccess {
     fn from_flags(flags: i32) -> Option<Self> {
         match flags {
             flags
-                if (flags & ffi::SQLITE_OPEN_CREATE > 0)
-                    && (flags & ffi::SQLITE_OPEN_EXCLUSIVE > 0) =>
-            {
-                Some(Self::CreateNew)
-            }
+            if (flags & ffi::SQLITE_OPEN_CREATE > 0)
+                && (flags & ffi::SQLITE_OPEN_EXCLUSIVE > 0) =>
+                {
+                    Some(Self::CreateNew)
+                }
             flags if flags & ffi::SQLITE_OPEN_CREATE > 0 => Some(Self::Create),
             flags if flags & ffi::SQLITE_OPEN_READWRITE > 0 => Some(Self::Write),
             flags if flags & ffi::SQLITE_OPEN_READONLY > 0 => Some(Self::Read),
